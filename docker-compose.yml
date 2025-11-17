@@ -1,0 +1,76 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: task_rpa_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-task_rpa}
+      MYSQL_USER: ${MYSQL_USER:-taskuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-taskpassword}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./back/db/init:/docker-entrypoint-initdb.d
+    networks:
+      - task_rpa_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./back
+      dockerfile: Dockerfile
+    container_name: task_rpa_backend
+    env_file:
+      - ./back/env.local
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${BACKEND_PORT:-3001}
+      DATABASE_URL: mysql://${MYSQL_USER:-taskuser}:${MYSQL_PASSWORD:-taskpassword}@mysql:3306/${MYSQL_DATABASE:-task_rpa}
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+    volumes:
+      - ./back:/app
+      - /app/node_modules
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - task_rpa_network
+    command: npm run dev
+
+  frontend:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    container_name: task_rpa_frontend
+    env_file:
+      - ./front/env.local
+    environment:
+      REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:3001}
+      REACT_APP_ENV: ${REACT_APP_ENV:-development}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./front:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - task_rpa_network
+    command: npm start
+
+volumes:
+  mysql_data:
+
+networks:
+  task_rpa_network:
+    driver: bridge
+

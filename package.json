@@ -1,0 +1,16 @@
+{
+  "name": "task-rpa",
+  "version": "1.0.0",
+  "description": "Task RPA - ChatGPT 기반 업무 자동화 툴",
+  "scripts": {
+    "git-commit": "node scripts/git-auto-commit.js",
+    "commit": "node scripts/git-auto-commit.js"
+  },
+  "keywords": ["rpa", "git", "automation"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.3.1"
+  }
+}
+
