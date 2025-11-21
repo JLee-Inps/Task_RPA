@@ -3,6 +3,8 @@ import styled from 'styled-components';
 import { useFrontAuthStore } from '../auth/store/authStore';
 import Layout from '../components/layout/Layout';
 import taskService, { Task } from '../services/taskService';
+import GanttChart from '../components/GanttChart';
+import TaskModal from '../components/TaskModal';
 
 const Container = styled.div`
   padding: ${props => props.theme.spacing.xl} ${props => props.theme.spacing.lg};
@@ -58,6 +60,78 @@ const SectionTitle = styled.h2`
   font-weight: ${props => props.theme.fontWeight.bold};
   color: ${props => props.theme.colors.gray[800]};
   margin-bottom: ${props => props.theme.spacing.xl};
+`;
+
+const SectionHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: ${props => props.theme.spacing.xl};
+`;
+
+const CreateButton = styled.button`
+  padding: ${props => `${props.theme.spacing.sm} ${props.theme.spacing.lg}`};
+  border-radius: ${props => props.theme.borderRadius.lg};
+  background-color: ${props => props.theme.colors.toss.blue};
+  color: ${props => props.theme.colors.white};
+  font-weight: ${props => props.theme.fontWeight.semibold};
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: ${props => props.theme.fontSize.sm};
+
+  &:hover {
+    background-color: ${props => props.theme.colors.primary[700]};
+    transform: translateY(-1px);
+    box-shadow: ${props => props.theme.shadows.md};
+  }
+`;
+
+const ViewTabs = styled.div`
+  display: flex;
+  gap: ${props => props.theme.spacing.sm};
+  margin-bottom: ${props => props.theme.spacing.xl};
+  border-bottom: 2px solid ${props => props.theme.colors.gray[200]};
+`;
+
+const TabButton = styled.button<{ $active: boolean }>`
+  padding: ${props => `${props.theme.spacing.sm} ${props.theme.spacing.lg}`};
+  border: none;
+  background: none;
+  border-bottom: 2px solid ${props => props.$active ? props.theme.colors.toss.blue : 'transparent'};
+  color: ${props => props.$active ? props.theme.colors.toss.blue : props.theme.colors.gray[600]};
+  font-weight: ${props => props.$active ? props.theme.fontWeight.semibold : props.theme.fontWeight.normal};
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: -2px;
+
+  &:hover {
+    color: ${props => props.theme.colors.toss.blue};
+  }
+`;
+
+const ExpandButton = styled.button<{ $expanded: boolean }>`
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  margin-right: ${props => props.theme.spacing.xs};
+  color: ${props => props.theme.colors.gray[500]};
+  transform: rotate(${props => props.$expanded ? '90deg' : '0deg'});
+  transition: transform 0.2s;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+const DangerTextButton = styled.button`
+  border: none;
+  background: none;
+  color: ${props => props.theme.colors.red[500]};
+  font-size: ${props => props.theme.fontSize.xs};
+  cursor: pointer;
 `;
 
 const TaskGrid = styled.div`
@@ -222,10 +296,16 @@ const statusLabels: Record<string, string> = {
   cancelled: '취소됨',
 };
 
+type ViewMode = 'list' | 'gantt';
+
 const UserDashboard: React.FC = () => {
   const { user } = useFrontAuthStore();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [expandedTasks, setExpandedTasks] = useState<Set<number>>(new Set());
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   useEffect(() => {
     loadTasks();
@@ -234,13 +314,49 @@ const UserDashboard: React.FC = () => {
   const loadTasks = async () => {
     try {
       setLoading(true);
-      const data = await taskService.getTasks();
-      setTasks(data);
+      // 상위 업무만 먼저 로드
+      const parentTasks = await taskService.getTasks({ include_children: false });
+      
+      // 각 상위 업무의 하위 업무 로드
+      const tasksWithChildren = await Promise.all(
+        parentTasks.map(async (task) => {
+          const children = await taskService.getTaskChildren(task.id);
+          return { ...task, children, children_count: children.length };
+        })
+      );
+      
+      setTasks(tasksWithChildren);
     } catch (error) {
       console.error('업무 목록 로드 실패:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleTaskExpand = (taskId: number) => {
+    setExpandedTasks(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  };
+
+  const handleTaskClick = (task: Task) => {
+    setSelectedTask(task);
+    setIsTaskModalOpen(true);
+  };
+
+  const handleCreateTask = () => {
+    setSelectedTask(null);
+    setIsTaskModalOpen(true);
+  };
+
+  const handleTaskModalSuccess = () => {
+    loadTasks();
   };
 
   const formatDate = (dateString?: string) => {
@@ -272,6 +388,125 @@ const UserDashboard: React.FC = () => {
   const averageProgress = tasks.length > 0
     ? Math.round(tasks.reduce((sum, task) => sum + task.progress, 0) / tasks.length)
     : 0;
+
+  const renderTaskTree = (task: Task, indent: number = 0): React.ReactNode => {
+    const hasChildren = task.children && task.children.length > 0;
+    const isExpanded = expandedTasks.has(task.id);
+    const daysRemaining = calculateDaysRemaining(task.end_date);
+
+    return (
+      <React.Fragment key={task.id}>
+        <TaskCard $status={task.status} style={{ marginLeft: `${indent * 24}px` }} onClick={() => handleTaskClick(task)}>
+          <TaskHeader>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+              {hasChildren && (
+                <ExpandButton
+                  $expanded={isExpanded}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleTaskExpand(task.id);
+                  }}
+                >
+                  ▶
+                </ExpandButton>
+              )}
+              {!hasChildren && <span style={{ width: '20px' }} />}
+              <TaskTitle>{task.title}</TaskTitle>
+              {task.children_count && task.children_count > 0 && (
+                <span style={{ fontSize: '0.75rem', color: '#666' }}>
+                  (하위 {task.children_count}개)
+                </span>
+              )}
+            </div>
+            <StatusBadge $status={task.status}>
+              {statusLabels[task.status]}
+            </StatusBadge>
+          </TaskHeader>
+
+          {task.description && (
+            <TaskDescription>{task.description}</TaskDescription>
+          )}
+
+          {task.git_summary && (
+            <GitInfo>
+              <strong>Git 요약:</strong> {task.git_summary}
+              {task.git_branch && (
+                <span style={{ marginLeft: '8px', color: '#666' }}>
+                  ({task.git_branch})
+                </span>
+              )}
+            </GitInfo>
+          )}
+
+          <DateInfo>
+            <DateItem>
+              <DateLabel>시작일</DateLabel>
+              <DateValue>{formatDate(task.start_date)}</DateValue>
+            </DateItem>
+            <DateItem>
+              <DateLabel>종료일</DateLabel>
+              <DateValue>
+                {formatDate(task.end_date)}
+                {daysRemaining !== null && daysRemaining >= 0 && (
+                  <span style={{ 
+                    marginLeft: '4px', 
+                    color: daysRemaining <= 3 ? '#ef4444' : '#666',
+                    fontSize: '0.75rem'
+                  }}>
+                    (D-{daysRemaining})
+                  </span>
+                )}
+              </DateValue>
+            </DateItem>
+          </DateInfo>
+
+          <ProgressSection>
+            <ProgressHeader>
+              <ProgressLabel>진행률</ProgressLabel>
+              <ProgressPercent>{task.progress}%</ProgressPercent>
+            </ProgressHeader>
+            <ProgressBar>
+              <ProgressFill $progress={task.progress} />
+            </ProgressBar>
+          </ProgressSection>
+
+          <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            {task.status !== 'completed' && (
+              <button
+                style={{ fontSize: '0.75rem', color: '#0064ff', border: 'none', background: 'none', cursor: 'pointer' }}
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    await taskService.updateTask(task.id, { status: 'completed', progress: 100 });
+                    await loadTasks();
+                  } catch (err) {
+                    console.error('업무 완료 처리 실패:', err);
+                  }
+                }}
+              >
+                완료 처리
+              </button>
+            )}
+            <DangerTextButton
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (!window.confirm('이 업무를 삭제하시겠습니까?')) return;
+                try {
+                  await taskService.deleteTask(task.id);
+                  await loadTasks();
+                } catch (err) {
+                  console.error('업무 삭제 실패:', err);
+                }
+              }}
+            >
+              삭제
+            </DangerTextButton>
+          </div>
+        </TaskCard>
+        {hasChildren && isExpanded && task.children?.map(child => renderTaskTree(child, indent + 1))}
+      </React.Fragment>
+    );
+  };
 
   return (
     <Layout>
@@ -306,7 +541,21 @@ const UserDashboard: React.FC = () => {
           </StatCard>
         </StatsGrid>
 
-        <SectionTitle>커서를 통해 등록된 업무 목록</SectionTitle>
+        <SectionHeader>
+          <SectionTitle>커서를 통해 등록된 업무</SectionTitle>
+          <CreateButton onClick={handleCreateTask}>
+            + 새 업무 작성
+          </CreateButton>
+        </SectionHeader>
+
+        <ViewTabs>
+          <TabButton $active={viewMode === 'list'} onClick={() => setViewMode('list')}>
+            목록 보기
+          </TabButton>
+          <TabButton $active={viewMode === 'gantt'} onClick={() => setViewMode('gantt')}>
+            간트 차트
+          </TabButton>
+        </ViewTabs>
 
         {loading ? (
           <LoadingState>로딩 중...</LoadingState>
@@ -314,75 +563,26 @@ const UserDashboard: React.FC = () => {
           <EmptyState>
             <p>등록된 업무가 없습니다.</p>
           </EmptyState>
-        ) : (
+        ) : viewMode === 'list' ? (
           <TaskGrid>
-            {tasks.map((task) => {
-              const daysRemaining = calculateDaysRemaining(task.end_date);
-              return (
-                <TaskCard key={task.id} $status={task.status}>
-                  <TaskHeader>
-                    <TaskTitle>{task.title}</TaskTitle>
-                    <StatusBadge $status={task.status}>
-                      {statusLabels[task.status]}
-                    </StatusBadge>
-                  </TaskHeader>
-
-                  {task.description && (
-                    <TaskDescription>{task.description}</TaskDescription>
-                  )}
-
-                  {task.git_summary && (
-                    <GitInfo>
-                      <strong>Git 요약:</strong> {task.git_summary}
-                      {task.git_branch && (
-                        <span style={{ marginLeft: '8px', color: '#666' }}>
-                          ({task.git_branch})
-                        </span>
-                      )}
-                      {task.git_commit_hash && (
-                        <span style={{ marginLeft: '8px', color: '#999', fontSize: '0.7rem' }}>
-                          [{task.git_commit_hash.substring(0, 7)}]
-                        </span>
-                      )}
-                    </GitInfo>
-                  )}
-
-                  <DateInfo>
-                    <DateItem>
-                      <DateLabel>시작일</DateLabel>
-                      <DateValue>{formatDate(task.start_date)}</DateValue>
-                    </DateItem>
-                    <DateItem>
-                      <DateLabel>종료일</DateLabel>
-                      <DateValue>
-                        {formatDate(task.end_date)}
-                        {daysRemaining !== null && daysRemaining >= 0 && (
-                          <span style={{ 
-                            marginLeft: '4px', 
-                            color: daysRemaining <= 3 ? '#ef4444' : '#666',
-                            fontSize: '0.75rem'
-                          }}>
-                            (D-{daysRemaining})
-                          </span>
-                        )}
-                      </DateValue>
-                    </DateItem>
-                  </DateInfo>
-
-                  <ProgressSection>
-                    <ProgressHeader>
-                      <ProgressLabel>진행률</ProgressLabel>
-                      <ProgressPercent>{task.progress}%</ProgressPercent>
-                    </ProgressHeader>
-                    <ProgressBar>
-                      <ProgressFill $progress={task.progress} />
-                    </ProgressBar>
-                  </ProgressSection>
-                </TaskCard>
-              );
-            })}
+            {tasks.map(task => renderTaskTree(task))}
           </TaskGrid>
+        ) : (
+          <GanttChart
+            tasks={tasks}
+            onTaskClick={handleTaskClick}
+          />
         )}
+
+        <TaskModal
+          isOpen={isTaskModalOpen}
+          onClose={() => {
+            setIsTaskModalOpen(false);
+            setSelectedTask(null);
+          }}
+          onSuccess={handleTaskModalSuccess}
+          task={selectedTask}
+        />
       </Container>
     </Layout>
   );
