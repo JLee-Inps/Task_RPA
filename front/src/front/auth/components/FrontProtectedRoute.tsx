@@ -38,43 +38,34 @@ interface FrontProtectedRouteProps {
   redirectIfAuthenticated?: boolean;
 }
 
-const FrontProtectedRoute: React.FC<FrontProtectedRouteProps> = ({ 
-  children, 
-  redirectIfAuthenticated = false 
+const FrontProtectedRoute: React.FC<FrontProtectedRouteProps> = ({
+  children,
+  redirectIfAuthenticated = false
 }) => {
   const { user, isAuthenticated, isLoading, checkAuth } = useFrontAuthStore();
   const location = useLocation();
-  const [isChecking, setIsChecking] = useState(false);
 
   // localStorage에 토큰이 있지만 인증 상태가 false인 경우 상태 복원 (한 번만)
+  // localStorage에 토큰이 있지만 인증 상태가 false인 경우 상태 복원 (한 번만)
   useEffect(() => {
-    if (!isAuthenticated && !isLoading && !isChecking) {
+    if (!isAuthenticated && !isLoading) {
       const stored = localStorage.getItem('front-auth-storage');
       if (stored) {
         try {
           const authData = JSON.parse(stored);
           if (authData.state?.token && authData.state?.user) {
-            // localStorage에 데이터가 있으면 checkAuth를 통해 상태 복원
-            // checkAuth는 localStorage를 먼저 확인하므로 안전함
-            setIsChecking(true);
-            checkAuth()
-              .then(() => {
-                setIsChecking(false);
-              })
-              .catch(() => {
-                setIsChecking(false);
-              });
+            // checkAuth 호출 제거 - AppRouter에서 처리하도록 위임하거나 store 초기화 시 처리됨
+            // 여기서는 단순히 로딩 상태만 관리
           }
         } catch (e) {
           // 파싱 실패 시 무시
-          setIsChecking(false);
         }
       }
     }
-  }, []); // 빈 배열로 마운트 시 한 번만 실행
+  }, [isAuthenticated, isLoading]);
 
-  // 로딩 중이거나 확인 중일 때는 리다이렉트하지 않고 대기
-  if (isLoading || isChecking) {
+  // 로딩 중일 때는 리다이렉트하지 않고 대기
+  if (isLoading) {
     return (
       <LoadingContainer>
         <Spinner />

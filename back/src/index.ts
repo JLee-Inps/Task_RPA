@@ -14,12 +14,12 @@ const fastify = Fastify({
     transport:
       config.NODE_ENV === 'development'
         ? {
-            target: 'pino-pretty',
-            options: {
-              translateTime: 'HH:MM:ss Z',
-              ignore: 'pid,hostname',
-            },
-          }
+          target: 'pino-pretty',
+          options: {
+            translateTime: 'HH:MM:ss Z',
+            ignore: 'pid,hostname',
+          },
+        }
         : undefined,
   },
 });
@@ -35,7 +35,21 @@ async function start() {
       secret: config.JWT_SECRET,
     });
 
-    await db.initialize();
+    // DB 연결 재시도 로직
+    let retries = 10;
+    while (retries > 0) {
+      try {
+        await db.initialize();
+        fastify.log.info('Database connected successfully');
+        break;
+      } catch (err: any) {
+        fastify.log.error(`Database connection failed: ${err.message}`);
+        retries--;
+        if (retries === 0) throw err;
+        fastify.log.info(`Retrying in 5 seconds... (${retries} attempts left)`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+    }
 
     await fastify.register(authRoutes, { prefix: '/api/auth' });
     await fastify.register(taskRoutes, { prefix: '/api/tasks' });

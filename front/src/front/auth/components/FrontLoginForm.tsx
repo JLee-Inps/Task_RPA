@@ -195,13 +195,14 @@ const FrontLoginForm: React.FC = () => {
           navigate('/dashboard', { replace: true });
         }
       }, 500);
-      
+
       return () => clearTimeout(timer);
     }
   }, [isAuthenticated, loading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation(); // 이벤트 전파 중단
     setError('');
     setLoading(true);
 
@@ -210,6 +211,7 @@ const FrontLoginForm: React.FC = () => {
       // persist가 localStorage에 저장될 시간을 주기 위해 약간의 지연
       // 로그인 성공 후 즉시 리다이렉트하지 않고 상태가 안정화될 때까지 대기
       await new Promise(resolve => setTimeout(resolve, 500));
+      setLoading(false);
       // 로그인 성공 시 리다이렉트는 useEffect에서 처리
     } catch (err) {
       setError(err instanceof Error ? err.message : '로그인에 실패했습니다.');
@@ -229,7 +231,7 @@ const FrontLoginForm: React.FC = () => {
 
         <Form onSubmit={handleSubmit}>
           {error && <ErrorAlert>{error}</ErrorAlert>}
-          
+
           <FormField>
             <Label htmlFor="email">이메일</Label>
             <Input

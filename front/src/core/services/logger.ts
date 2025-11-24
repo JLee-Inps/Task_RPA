@@ -10,7 +10,7 @@ class Logger {
   private logLevel: LogLevel;
 
   constructor() {
-    this.logLevel = env.REACT_APP_LOG_LEVEL;
+    this.logLevel = (env.REACT_APP_LOG_LEVEL as LogLevel) || 'debug';
   }
 
   private shouldLog(level: LogLevel): boolean {
@@ -59,7 +59,7 @@ class Logger {
     if (env.REACT_APP_ENABLE_ERROR_REPORTING && env.REACT_APP_ENV === 'production') {
       // 실제 에러 리포팅 서비스 (Sentry, Bugsnag 등) 연동
       this.error('Error reported:', error.message, context);
-      
+
       // 여기에 실제 에러 리포팅 서비스 호출 코드 추가
       // 예: Sentry.captureException(error, { extra: context });
     } else {

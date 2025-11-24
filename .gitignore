@@ -1,5 +1,6 @@
 
 
-**/env*
+**/front/env*
+**/back/env*
 
 **/node_modules

@@ -10,8 +10,14 @@ export interface Task {
   user_id: number;
   title: string;
   description?: string;
+  content?: string;
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   priority: 'low' | 'medium' | 'high';
+  assignee?: string;
+  watchers?: string[];
+  parent_task_id?: number | null;
+  children?: Task[];
+  children_count?: number;
   git_commit_hash?: string;
   git_branch?: string;
   git_summary?: string;
@@ -26,7 +32,11 @@ export interface Task {
 export interface CreateTaskRequest {
   title: string;
   description?: string;
+  content?: string;
   priority?: 'low' | 'medium' | 'high';
+  assignee?: string;
+  watchers?: string[];
+  parent_task_id?: number | null;
   start_date?: string;
   end_date?: string;
   due_date?: string;
@@ -36,8 +46,12 @@ export interface CreateTaskRequest {
 export interface UpdateTaskRequest {
   title?: string;
   description?: string;
+  content?: string;
   status?: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   priority?: 'low' | 'medium' | 'high';
+  assignee?: string;
+  watchers?: string[];
+  parent_task_id?: number | null;
   start_date?: string;
   end_date?: string;
   due_date?: string;
@@ -192,7 +206,7 @@ const mockDeleteTask = async (id: number): Promise<void> => {
 };
 
 // 실제 API 호출 함수들
-const getTasks = async (params?: { status?: string; start_date?: string; end_date?: string }): Promise<Task[]> => {
+const getTasks = async (params?: { status?: string; start_date?: string; end_date?: string; include_children?: boolean; parent_only?: boolean }): Promise<Task[]> => {
   if (env.REACT_APP_USE_MOCK) {
     console.log('📝 Mock 데이터로 업무 목록 조회');
     return mockGetTasks();
@@ -231,11 +245,26 @@ const deleteTask = async (id: number): Promise<void> => {
   await apiClient.delete(`/tasks/${id}`);
 };
 
+const getTaskChildren = async (id: number): Promise<Task[]> => {
+  if (env.REACT_APP_USE_MOCK) {
+    console.log('📝 Mock 데이터로 하위 업무 조회');
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve([]);
+      }, 500);
+    });
+  }
+
+  const response = await apiClient.get(`/tasks/${id}/children`);
+  return response.data.tasks;
+};
+
 const taskService = {
   getTasks,
   createTask,
   updateTask,
   deleteTask,
+  getTaskChildren,
 };
 
 export default taskService;

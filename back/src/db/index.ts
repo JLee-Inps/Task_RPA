@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { config } from '../config';
+import bcrypt from 'bcryptjs';
 
 let pool: mysql.Pool | null = null;
 
@@ -68,9 +69,9 @@ export const db = {
         AND TABLE_NAME = 'tasks' 
         AND COLUMN_NAME IN ('start_date', 'end_date', 'progress')
       `);
-      
+
       const existingColumns = (columns as any[]).map((col: any) => col.COLUMN_NAME);
-      
+
       if (!existingColumns.includes('start_date')) {
         await pool.execute(`ALTER TABLE tasks ADD COLUMN start_date DATETIME AFTER git_summary`);
       }
@@ -115,6 +116,22 @@ export const db = {
         INDEX idx_committed_at (committed_at)
       )
     `);
+
+    // 초기 사용자 생성 (Seed Data)
+    try {
+      const [users] = await pool.execute('SELECT id FROM users WHERE email = ?', ['user@toss.com']);
+      if (Array.isArray(users) && users.length === 0) {
+        console.log('Creating seed user...');
+        const hashedPassword = await bcrypt.hash('user123', 10);
+        await pool.execute(
+          'INSERT INTO users (name, email, password) VALUES (?, ?, ?)',
+          ['김사용자', 'user@toss.com', hashedPassword]
+        );
+        console.log('Seed user created: user@toss.com / user123');
+      }
+    } catch (error: any) {
+      console.error('Failed to create seed user:', error);
+    }
   },
 
   getPool() {

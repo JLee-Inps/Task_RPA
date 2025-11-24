@@ -303,9 +303,12 @@ const UserDashboard: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [expandedTasks, setExpandedTasks] = useState<Set<number>>(new Set());
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
+  // 계층 탐색을 위한 상태
+  const [currentParentTask, setCurrentParentTask] = useState<Task | null>(null);
+  const [childrenTasks, setChildrenTasks] = useState<Task[]>([]);
 
   useEffect(() => {
     loadTasks();
@@ -314,18 +317,9 @@ const UserDashboard: React.FC = () => {
   const loadTasks = async () => {
     try {
       setLoading(true);
-      // 상위 업무만 먼저 로드
-      const parentTasks = await taskService.getTasks({ include_children: false });
-      
-      // 각 상위 업무의 하위 업무 로드
-      const tasksWithChildren = await Promise.all(
-        parentTasks.map(async (task) => {
-          const children = await taskService.getTaskChildren(task.id);
-          return { ...task, children, children_count: children.length };
-        })
-      );
-      
-      setTasks(tasksWithChildren);
+      // 최상위 업무만 로드 (parent_task_id가 null인 것만)
+      const parentTasks = await taskService.getTasks({ parent_only: true });
+      setTasks(parentTasks);
     } catch (error) {
       console.error('업무 목록 로드 실패:', error);
     } finally {
@@ -333,21 +327,34 @@ const UserDashboard: React.FC = () => {
     }
   };
 
-  const toggleTaskExpand = (taskId: number) => {
-    setExpandedTasks(prev => {
-      const next = new Set(prev);
-      if (next.has(taskId)) {
-        next.delete(taskId);
-      } else {
-        next.add(taskId);
+  const handleTaskCardClick = async (task: Task) => {
+    // 하위 업무가 있으면 하위 업무 목록 뷰로 전환
+    if (task.children_count && task.children_count > 0) {
+      try {
+        setLoading(true);
+        const children = await taskService.getTaskChildren(task.id);
+        setCurrentParentTask(task);
+        setChildrenTasks(children);
+      } catch (error) {
+        console.error('하위 업무 로드 실패:', error);
+      } finally {
+        setLoading(false);
       }
-      return next;
-    });
+    } else {
+      // 하위 업무가 없으면 수정 모달 열기
+      handleTaskEditClick(task);
+    }
   };
 
-  const handleTaskClick = (task: Task) => {
+  const handleTaskEditClick = (task: Task) => {
     setSelectedTask(task);
     setIsTaskModalOpen(true);
+  };
+
+  const handleBackToParent = () => {
+    setCurrentParentTask(null);
+    setChildrenTasks([]);
+    loadTasks();
   };
 
   const handleCreateTask = () => {
@@ -356,7 +363,13 @@ const UserDashboard: React.FC = () => {
   };
 
   const handleTaskModalSuccess = () => {
-    loadTasks();
+    if (currentParentTask) {
+      // 하위 업무 뷰에 있으면 하위 업무 다시 로드
+      handleTaskCardClick(currentParentTask);
+    } else {
+      // 최상위 뷰에 있으면 최상위 업무 다시 로드
+      loadTasks();
+    }
   };
 
   const formatDate = (dateString?: string) => {
@@ -389,122 +402,127 @@ const UserDashboard: React.FC = () => {
     ? Math.round(tasks.reduce((sum, task) => sum + task.progress, 0) / tasks.length)
     : 0;
 
-  const renderTaskTree = (task: Task, indent: number = 0): React.ReactNode => {
-    const hasChildren = task.children && task.children.length > 0;
-    const isExpanded = expandedTasks.has(task.id);
+  const renderTaskCard = (task: Task) => {
     const daysRemaining = calculateDaysRemaining(task.end_date);
+    const hasChildren = task.children_count && task.children_count > 0;
 
     return (
-      <React.Fragment key={task.id}>
-        <TaskCard $status={task.status} style={{ marginLeft: `${indent * 24}px` }} onClick={() => handleTaskClick(task)}>
-          <TaskHeader>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-              {hasChildren && (
-                <ExpandButton
-                  $expanded={isExpanded}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleTaskExpand(task.id);
-                  }}
-                >
-                  ▶
-                </ExpandButton>
-              )}
-              {!hasChildren && <span style={{ width: '20px' }} />}
-              <TaskTitle>{task.title}</TaskTitle>
-              {task.children_count && task.children_count > 0 && (
-                <span style={{ fontSize: '0.75rem', color: '#666' }}>
-                  (하위 {task.children_count}개)
-                </span>
-              )}
-            </div>
-            <StatusBadge $status={task.status}>
-              {statusLabels[task.status]}
-            </StatusBadge>
-          </TaskHeader>
-
-          {task.description && (
-            <TaskDescription>{task.description}</TaskDescription>
-          )}
-
-          {task.git_summary && (
-            <GitInfo>
-              <strong>Git 요약:</strong> {task.git_summary}
-              {task.git_branch && (
-                <span style={{ marginLeft: '8px', color: '#666' }}>
-                  ({task.git_branch})
-                </span>
-              )}
-            </GitInfo>
-          )}
-
-          <DateInfo>
-            <DateItem>
-              <DateLabel>시작일</DateLabel>
-              <DateValue>{formatDate(task.start_date)}</DateValue>
-            </DateItem>
-            <DateItem>
-              <DateLabel>종료일</DateLabel>
-              <DateValue>
-                {formatDate(task.end_date)}
-                {daysRemaining !== null && daysRemaining >= 0 && (
-                  <span style={{ 
-                    marginLeft: '4px', 
-                    color: daysRemaining <= 3 ? '#ef4444' : '#666',
-                    fontSize: '0.75rem'
-                  }}>
-                    (D-{daysRemaining})
-                  </span>
-                )}
-              </DateValue>
-            </DateItem>
-          </DateInfo>
-
-          <ProgressSection>
-            <ProgressHeader>
-              <ProgressLabel>진행률</ProgressLabel>
-              <ProgressPercent>{task.progress}%</ProgressPercent>
-            </ProgressHeader>
-            <ProgressBar>
-              <ProgressFill $progress={task.progress} />
-            </ProgressBar>
-          </ProgressSection>
-
-          <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            {task.status !== 'completed' && (
-              <button
-                style={{ fontSize: '0.75rem', color: '#0064ff', border: 'none', background: 'none', cursor: 'pointer' }}
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  try {
-                    await taskService.updateTask(task.id, { status: 'completed', progress: 100 });
-                    await loadTasks();
-                  } catch (err) {
-                    console.error('업무 완료 처리 실패:', err);
-                  }
-                }}
-              >
-                완료 처리
-              </button>
+      <TaskCard
+        key={task.id}
+        $status={task.status}
+        onClick={() => handleTaskCardClick(task)}
+      >
+        <TaskHeader>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+            <TaskTitle>{task.title}</TaskTitle>
+            {hasChildren && (
+              <span style={{ fontSize: '0.75rem', color: '#666' }}>
+                (하위 {task.children_count}개)
+              </span>
             )}
-            <DangerTextButton
+          </div>
+          <StatusBadge $status={task.status}>
+            {statusLabels[task.status]}
+          </StatusBadge>
+        </TaskHeader>
+
+        {task.description && (
+          <TaskDescription>{task.description}</TaskDescription>
+        )}
+
+        {task.git_summary && (
+          <GitInfo>
+            <strong>Git 요약:</strong> {task.git_summary}
+            {task.git_branch && (
+              <span style={{ marginLeft: '8px', color: '#666' }}>
+                ({task.git_branch})
+              </span>
+            )}
+          </GitInfo>
+        )}
+
+        <DateInfo>
+          <DateItem>
+            <DateLabel>시작일</DateLabel>
+            <DateValue>{formatDate(task.start_date)}</DateValue>
+          </DateItem>
+          <DateItem>
+            <DateLabel>종료일</DateLabel>
+            <DateValue>
+              {formatDate(task.end_date)}
+              {daysRemaining !== null && daysRemaining >= 0 && (
+                <span style={{
+                  marginLeft: '4px',
+                  color: daysRemaining <= 3 ? '#ef4444' : '#666',
+                  fontSize: '0.75rem'
+                }}>
+                  (D-{daysRemaining})
+                </span>
+              )}
+            </DateValue>
+          </DateItem>
+        </DateInfo>
+
+        <ProgressSection>
+          <ProgressHeader>
+            <ProgressLabel>진행률</ProgressLabel>
+            <ProgressPercent>{task.progress}%</ProgressPercent>
+          </ProgressHeader>
+          <ProgressBar>
+            <ProgressFill $progress={task.progress} />
+          </ProgressBar>
+        </ProgressSection>
+
+        <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button
+            style={{ fontSize: '0.75rem', color: '#0064ff', border: 'none', background: 'none', cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleTaskEditClick(task);
+            }}
+          >
+            수정
+          </button>
+          {task.status !== 'completed' && (
+            <button
+              style={{ fontSize: '0.75rem', color: '#0064ff', border: 'none', background: 'none', cursor: 'pointer' }}
               onClick={async (e) => {
                 e.stopPropagation();
-                if (!window.confirm('이 업무를 삭제하시겠습니까?')) return;
                 try {
-                  await taskService.deleteTask(task.id);
-                  await loadTasks();
+                  await taskService.updateTask(task.id, { status: 'completed', progress: 100 });
+                  if (currentParentTask) {
+                    handleTaskCardClick(currentParentTask);
+                  } else {
+                    await loadTasks();
+                  }
                 } catch (err) {
-                  console.error('업무 삭제 실패:', err);
+                  console.error('업무 완료 처리 실패:', err);
                 }
               }}
             >
-              삭제
-            </DangerTextButton>
-          </div>
-        </TaskCard>
-        {hasChildren && isExpanded && task.children?.map(child => renderTaskTree(child, indent + 1))}
-      </React.Fragment>
+              완료 처리
+            </button>
+          )}
+          <DangerTextButton
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (!window.confirm('이 업무를 삭제하시겠습니까?')) return;
+              try {
+                await taskService.deleteTask(task.id);
+                if (currentParentTask) {
+                  handleTaskCardClick(currentParentTask);
+                } else {
+                  await loadTasks();
+                }
+              } catch (err) {
+                console.error('업무 삭제 실패:', err);
+              }
+            }}
+          >
+            삭제
+          </DangerTextButton>
+        </div>
+      </TaskCard>
     );
   };
 
@@ -542,7 +560,31 @@ const UserDashboard: React.FC = () => {
         </StatsGrid>
 
         <SectionHeader>
-          <SectionTitle>커서를 통해 등록된 업무</SectionTitle>
+          <div>
+            {currentParentTask && (
+              <div style={{ marginBottom: '8px' }}>
+                <button
+                  onClick={handleBackToParent}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: '1px solid #e5e7eb',
+                    background: 'white',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  ← 뒤로 가기
+                </button>
+              </div>
+            )}
+            <SectionTitle>
+              {currentParentTask ? `${currentParentTask.title} - 하위 업무` : '최상위 업무'}
+            </SectionTitle>
+          </div>
           <CreateButton onClick={handleCreateTask}>
             + 새 업무 작성
           </CreateButton>
@@ -559,19 +601,38 @@ const UserDashboard: React.FC = () => {
 
         {loading ? (
           <LoadingState>로딩 중...</LoadingState>
-        ) : tasks.length === 0 ? (
-          <EmptyState>
-            <p>등록된 업무가 없습니다.</p>
-          </EmptyState>
-        ) : viewMode === 'list' ? (
-          <TaskGrid>
-            {tasks.map(task => renderTaskTree(task))}
-          </TaskGrid>
+        ) : currentParentTask ? (
+          // 하위 업무 뷰
+          childrenTasks.length === 0 ? (
+            <EmptyState>
+              <p>하위 업무가 없습니다.</p>
+            </EmptyState>
+          ) : viewMode === 'list' ? (
+            <TaskGrid>
+              {childrenTasks.map(task => renderTaskCard(task))}
+            </TaskGrid>
+          ) : (
+            <GanttChart
+              tasks={childrenTasks}
+              onTaskClick={handleTaskEditClick}
+            />
+          )
         ) : (
-          <GanttChart
-            tasks={tasks}
-            onTaskClick={handleTaskClick}
-          />
+          // 최상위 업무 뷰
+          tasks.length === 0 ? (
+            <EmptyState>
+              <p>등록된 업무가 없습니다.</p>
+            </EmptyState>
+          ) : viewMode === 'list' ? (
+            <TaskGrid>
+              {tasks.map(task => renderTaskCard(task))}
+            </TaskGrid>
+          ) : (
+            <GanttChart
+              tasks={tasks}
+              onTaskClick={handleTaskEditClick}
+            />
+          )
         )}
 
         <TaskModal
